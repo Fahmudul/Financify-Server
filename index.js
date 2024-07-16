@@ -29,7 +29,6 @@ async function run() {
     // Request User
     app.post("/request-user", async (req, res) => {
       const requestedUser = req.body;
-      // console.log(requestedUser);
       // Checking is this user already requested
       const alreadyRequested = await requestedUserCollection.findOne({
         email: requestedUser.email,
@@ -57,7 +56,6 @@ async function run() {
     // Log in request
     app.post("/login-number-email", async (req, res) => {
       const user = req.body;
-      console.log(user);
       // Checking the requested login user gave email or phone
       const text = user.phoneEmail;
       const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -67,12 +65,9 @@ async function run() {
       let userRequestWithType;
       if (emailRegex.test(text)) {
         userRequestWithType = "Email";
-        console.log(userRequestWithType);
       } else if (phoneRegex.test(text)) {
         userRequestWithType = "Phone";
-        console.log(userRequestWithType);
       } else {
-        console.log("Please enter a valid email or phone number");
         return res.send({
           success: false,
           message: "Please enter a valid email or phone number",
@@ -80,11 +75,9 @@ async function run() {
       }
       // Searching by email
       if (userRequestWithType === "Email") {
-        console.log("Searching by email");
         const existUser = await acceptedUserCollection.findOne({
           email: user.phoneEmail,
         });
-        console.log(existUser);
 
         if (existUser) {
           const mathcedPassword = await bcrypt.compare(
@@ -92,16 +85,12 @@ async function run() {
             existUser.hashedPassword
           );
           if (mathcedPassword) {
-            console.log("password mathced");
-
             return res.send({
               success: true,
               message: "Login success",
               user: { email: existUser.email, phone: existUser.phone },
             });
           } else {
-            console.log("password not mathced");
-
             return res.send({ success: false, message: "Wrong password" });
           }
         }
@@ -109,26 +98,21 @@ async function run() {
 
       // Searching by phone
       if (userRequestWithType === "Phone") {
-        console.log("Searching by phone");
         const existUser = await acceptedUserCollection.findOne({
           phone: user.phoneEmail,
         });
-        console.log(existUser);
         if (existUser) {
           const mathcedPassword = await bcrypt.compare(
             user.password,
             existUser.hashedPassword
           );
           if (mathcedPassword) {
-            console.log("password mathced");
             return res.send({
               success: true,
               message: "Login success",
               user: { email: existUser.email, phone: existUser.phone },
             });
           } else {
-            console.log("password not mathced");
-
             return res.send({ success: false, message: "Wrong password" });
           }
         }
@@ -138,10 +122,17 @@ async function run() {
     // Get one user
     app.get("/user-phone", async (req, res) => {
       const phone = req.query.phone;
-      console.log(phone);
       const user = await acceptedUserCollection.findOne({ phone: phone });
-      console.log(user);
       res.send(user);
+    });
+
+    // Get all  users
+
+    app.get("/users", async (req, res) => {
+      const users = await acceptedUserCollection.find({}).toArray();
+      const requestedUser = await requestedUserCollection.find({}).toArray();
+
+      res.send([...users, ...requestedUser]);
     });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
