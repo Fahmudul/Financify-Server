@@ -1,6 +1,8 @@
 const express = require("express");
 const port = 5000 || process.env.PORT;
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const bcrypt = require("bcryptjs");
 require("dotenv").config();
@@ -19,6 +21,31 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+// const cookieOptions = {
+//   httpOnly: true,
+//   secure: process.env.NODE_ENV === "production" ? true : false,
+//   sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+// };
+
+// Middleware
+const verifyJWT = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  console.log("token", authHeader);
+  if (!authHeader) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ message: "Forbidden access" });
+    }
+    req.decoded = decoded;
+    console.log("decoded", decoded);
+    console.log("verified");
+    next();
+  });
+};
 async function run() {
   try {
     const db = client.db("Financify");
@@ -26,7 +53,7 @@ async function run() {
 
     const requestedUserCollection = db.collection("requested-users");
 
-    // Request User
+    // Registered visitor to be User or Agent
     app.post("/request-user", async (req, res) => {
       const requestedUser = req.body;
       // Checking is this user already requested
@@ -50,7 +77,11 @@ async function run() {
         });
       }
       const result = await requestedUserCollection.insertOne(requestedUser);
-      return res.send({ success: true, message: "Request sent" });
+      return res.send({
+        success: true,
+        message: "Request sent wait for approval",
+        result,
+      });
     });
 
     // Log in request
@@ -59,7 +90,11 @@ async function run() {
       // Checking the requested login user gave email or phone
       const text = user.phoneEmail;
       const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-
+      const accessToken = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "10d",
+      });
+      // console.log(accessToken);
+      // res.send({ accessToken });
       // Regular expression for detecting a phone number with exactly 11 digits
       const phoneRegex = /^\d{11}$/;
       let userRequestWithType;
@@ -88,7 +123,12 @@ async function run() {
             return res.send({
               success: true,
               message: "Login success",
-              user: { email: existUser.email, phone: existUser.phone },
+              user: {
+                email: existUser.email,
+                phone: existUser.phone,
+                role: existUser.role,
+              },
+              accessToken,
             });
           } else {
             return res.send({ success: false, message: "Wrong password" });
@@ -110,7 +150,12 @@ async function run() {
             return res.send({
               success: true,
               message: "Login success",
-              user: { email: existUser.email, phone: existUser.phone },
+              user: {
+                email: existUser.email,
+                phone: existUser.phone,
+                role: existUser.role,
+              },
+              accessToken,
             });
           } else {
             return res.send({ success: false, message: "Wrong password" });
@@ -120,7 +165,7 @@ async function run() {
     });
 
     // Get one user
-    app.get("/user-phone", async (req, res) => {
+    app.get("/user-phone", verifyJWT, async (req, res) => {
       const phone = req.query.phone;
       const user = await acceptedUserCollection.findOne({ phone: phone });
       res.send(user);
@@ -133,6 +178,48 @@ async function run() {
       const requestedUser = await requestedUserCollection.find({}).toArray();
 
       res.send([...users, ...requestedUser]);
+    });
+
+    // Accept Visitor Request
+    app.patch("/accept-visitor-request", async (req, res) => {
+      // console.log("req.body", req.query);
+      console.log("route hitting");
+      const phone = req.query.phone;
+      const action = req.query.action;
+      if (action === "approved") {
+        // Chekcing if the user already exist
+        const user = await acceptedUserCollection.findOne({ phone: phone });
+
+        if (user) {
+          return res.send({
+            success: false,
+            message: "Already exist. Please login",
+          });
+        }
+        const approvedUser = await requestedUserCollection.findOne({ phone });
+        // console.log("got", approvedUser);
+        if (approvedUser) {
+          // Change Role
+          let newUser = { ...approvedUser };
+          newUser.role = newUser.appliedFor;
+          delete newUser.appliedFor;
+          // console.log("newUser", newUser);
+          // Add bonus 40 to user account and 10000 for Agent
+          if (newUser.role === "Agent") {
+            newUser.accountBalance = 10000;
+          } else {
+            newUser.accountBalance = 40;
+          }
+          const result = await acceptedUserCollection.insertOne(newUser);
+          const deleteFromRequest = await requestedUserCollection.deleteOne({
+            phone,
+          });
+          return res.send({ success: true, result, deleteFromRequest });
+        }
+      } else {
+        const result = await requestedUserCollection.deleteOne({ phone });
+        return res.send(result);
+      }
     });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
